@@ -1,0 +1,110 @@
+#!/usr/bin/env lua5.2
+local luxio = require("luxio")
+
+local kindle_path
+local repo_path
+
+local function isbook(file)
+    return file:find("%.mobi$") or file:find("%.azw3$") or file:find("%.azw$")
+end
+
+local function dirwalker(path, callback)
+    local files = {}
+    local dir = luxio.opendir(path)
+    while true do
+        local e, t = luxio.readdir(dir)
+        if not e then
+            break
+        end
+        if e ~= 0 then
+            error("dir scan fail")
+        end
+        files[#files+1] = t.d_name
+    end
+    luxio.closedir(dir)
+
+    for _, f in ipairs(files) do
+        if not f:find("^%.") then
+            f = path.."/"..f
+            if isbook(f) then
+                callback(f)
+            end
+
+            local e, t = luxio.stat(f)
+            if t and (luxio.S_ISDIR(t.mode) == 1) then
+                dirwalker(f, callback)
+            end
+        end
+    end
+end
+
+local function scan_path(path)
+    dirwalker(kindle_path,
+        function (file)
+            print(file)
+        end
+    )
+end
+
+local function parse_arguments(argmap, arg)
+    local i = 1
+    local files = {}
+
+    local function unrecognisedarg(arg)
+        argmap[" unrecognised"](arg)
+    end
+
+    while (i <= #arg) do
+        local o = arg[i]
+        local op
+
+        if (o:byte(1) == 45) then
+            -- This is an option.
+            if (o:byte(2) == 45) then
+                -- ...with a -- prefix.
+                o = o:sub(3)
+                local fn = argmap[o]
+                if not fn then
+                        unrecognisedarg("--"..o)
+                end
+                i = i + fn(arg[i+1], arg[i+2])
+            else
+                -- ...without a -- prefix.
+                local od = o:sub(2, 2)
+                local fn = argmap[od]
+                if not fn then
+                        unrecognisedarg("-"..od)
+                end
+                op = o:sub(3)
+                if (op == "") then
+                        i = i + fn(arg[i+1], arg[i+2])
+                else
+                        fn(op)
+                end
+            end
+        else
+            files[#files+1] = o
+        end
+        i = i + 1
+    end
+
+    argmap[" files"](files)
+end
+
+parse_arguments(
+    {
+        ["kindle"] = function(arg) kindle_path = arg return 1 end,
+        ["repo"] = function(arg) repo_path = arg return 1 end,
+        [" files"] = function(files)
+            if #files ~= 0 then
+                error("don't pass files here")
+            end
+        end
+    },
+    {...}
+)
+
+if not kindle_path then
+    error("you must set a kindle path")
+end
+scan_path(kindle_path)
